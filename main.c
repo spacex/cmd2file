@@ -70,7 +70,8 @@ int main(int argc, char **argv) {
       PRINT_DEBUG("r: %zu w: %zu EOF: %d\n", read_count, write_count,
         feof(proc_fd));
     }
-    PRINT_DEBUG("Exited loop.\n");
+    fflush(fifo_fd);
+    PRINT_DEBUG("Flushed output.\n");
 
     if (fifo_fd != NULL)
       fclose(fifo_fd);
