@@ -25,6 +25,7 @@ int main(int argc, char **argv) {
   char rw_buf[BUFSIZ] = {0x0};
   size_t read_count = 0;
   size_t write_count = 0;
+  int feof_status = -1;
   int ret = -1;
 
   char *fifo_path = "/tmp/fifo";
@@ -64,11 +65,13 @@ int main(int argc, char **argv) {
     PRINT_DEBUG("Executed process\n");
     proc_fd = popen(process_cmd, "r");
 
-    while (feof(proc_fd) == 0) {
+    feof_status = feof(proc_fd);
+    while (feof_status == 0) {
       read_count = fread(rw_buf, 1, BUFSIZ, proc_fd);
+      feof_status = feof(proc_fd);
       write_count = fwrite(rw_buf, 1, read_count, fifo_fd);
       PRINT_DEBUG("r: %zu w: %zu EOF: %d\n", read_count, write_count,
-        feof(proc_fd));
+        feof_status);
     }
     fflush(fifo_fd);
     PRINT_DEBUG("Flushed output.\n");
@@ -79,6 +82,10 @@ int main(int argc, char **argv) {
     pclose(proc_fd);
     PRINT_DEBUG("Closed files.\n");
 
+    ret = unlink(fifo_path);
+    PRINT_DEBUG("Deleted fifo.\n");
+    ret = mkfifo(fifo_path, S_IRWXU | S_IRWXG | S_IRWXO);
+    PRINT_DEBUG("Created new fifo.\n");
     fifo_fd = fopen(fifo_path, "w");
     PRINT_DEBUG("fifo_fd: %d\n", fifo_fd == NULL);
   } while (fifo_fd != NULL);
