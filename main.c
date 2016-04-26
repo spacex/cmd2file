@@ -65,6 +65,8 @@ int main(int argc, char **argv) {
     PRINT_DEBUG("Executed process\n");
     proc_fd = popen(process_cmd, "r");
 
+    ret = unlink(fifo_path);
+    PRINT_DEBUG("Deleted fifo.\n");
     feof_status = feof(proc_fd);
     while (feof_status == 0) {
       read_count = fread(rw_buf, 1, BUFSIZ, proc_fd);
@@ -82,8 +84,6 @@ int main(int argc, char **argv) {
     pclose(proc_fd);
     PRINT_DEBUG("Closed files.\n");
 
-    ret = unlink(fifo_path);
-    PRINT_DEBUG("Deleted fifo.\n");
     ret = mkfifo(fifo_path, S_IRWXU | S_IRWXG | S_IRWXO);
     PRINT_DEBUG("Created new fifo.\n");
     fifo_fd = fopen(fifo_path, "w");
