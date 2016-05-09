@@ -25,11 +25,15 @@ void sig(int signum) {
   }
 }
 
-char *fifo_path = "/tmp/fifo";
-//char *process_cmd = "date";
-char *process_cmd = "echo \"Hello World!\"";
+typedef struct {
+  char *path;
+  char *cmd;
+  int cachefile_time;
+  pthread_mutex_t file_mutex;
+} file_info_t;
 
 void *do_fifo(void *arg) {
+  file_info_t *file_info = (file_info_t *)arg;
   FILE *fifo_fd = NULL;
   FILE *proc_fd = NULL;
   char rw_buf[BUFSIZ] = {0x0};
@@ -39,24 +43,24 @@ void *do_fifo(void *arg) {
   int ret = -1;
 
   // open should block until reader is ready
-  fifo_fd = fopen(fifo_path, "w");
+  fifo_fd = fopen(file_info->path, "w");
 
   do {
     PRINT_DEBUG("Executed process\n");
-    proc_fd = popen(process_cmd, "r");
+    proc_fd = popen(file_info->cmd, "r");
 
-    ret = unlink(fifo_path);
+    ret = unlink(file_info->path);
     PRINT_DEBUG("Deleted fifo.\n");
     feof_status = feof(proc_fd);
     while (feof_status == 0) {
       read_count = fread(rw_buf, 1, BUFSIZ, proc_fd);
       feof_status = feof(proc_fd);
       write_count = fwrite(rw_buf, 1, read_count, fifo_fd);
-      PRINT_DEBUG("r: %zu w: %zu EOF: %d\n", read_count, write_count,
-        feof_status);
+      //PRINT_DEBUG("r: %zu w: %zu EOF: %d\n", read_count, write_count,
+      //  feof_status);
     }
     fflush(fifo_fd);
-    PRINT_DEBUG("Flushed output.\n");
+    //PRINT_DEBUG("Flushed output.\n");
 
     if (fifo_fd != NULL)
       fclose(fifo_fd);
@@ -64,9 +68,9 @@ void *do_fifo(void *arg) {
     pclose(proc_fd);
     PRINT_DEBUG("Closed files.\n");
 
-    ret = mkfifo(fifo_path, S_IRWXU | S_IRWXG | S_IRWXO);
+    ret = mkfifo(file_info->path, S_IRWXU | S_IRWXG | S_IRWXO);
     PRINT_DEBUG("Created new fifo.\n");
-    fifo_fd = fopen(fifo_path, "w");
+    fifo_fd = fopen(file_info->path, "w");
     PRINT_DEBUG("fifo_fd: %d\n", fifo_fd == NULL);
   } while (fifo_fd != NULL);
 
@@ -75,11 +79,17 @@ void *do_fifo(void *arg) {
 
 int main(int argc, char **argv) {
   pthread_t *worker_threads;
+  file_info_t file_info;
   void *status;
   int ret = -1;
 
   thread_cnt = sysconf(_SC_NPROCESSORS_ONLN);
   worker_threads = malloc(thread_cnt * sizeof(pthread_t));
+
+  file_info.path = "/tmp/fifo";
+  //file_info.cmd = "date";
+  file_info.cmd = "echo \"Hello World!\"";
+  file_info.cachefile_time = 0;
 
   signal(SIGHUP, sig);
   signal(SIGINT, sig);
@@ -103,22 +113,22 @@ int main(int argc, char **argv) {
   pthread_mutex_init(&fifo_mutex, NULL);
 
   pthread_mutex_lock(&fifo_mutex);
-  if ( access(fifo_path, F_OK) != -1) {
+  if ( access(file_info.path, F_OK) != -1) {
     PRINT_DEBUG("Removed existing file.\n");
-    ret = unlink(fifo_path);
+    ret = unlink(file_info.path);
   }
-  ret = mkfifo(fifo_path, S_IRWXU | S_IRWXG | S_IRWXO);
+  ret = mkfifo(file_info.path, S_IRWXU | S_IRWXG | S_IRWXO);
   PRINT_DEBUG("Created fifo.\n");
 
   printf("Ready to receive reads ...\n");
-  pthread_create(&worker_threads[0], NULL, do_fifo, NULL);
+  pthread_create(&worker_threads[0], NULL, do_fifo, (void *)&file_info);
 
   pthread_join(worker_threads[0], &status);
 
   pthread_mutex_destroy(&thread_cnt_mutex);
   pthread_mutex_destroy(&fifo_mutex);
 
-  ret = unlink(fifo_path);
+  ret = unlink(file_info.path);
   PRINT_DEBUG("Removed fifo.\n");
 
   pthread_exit(NULL);
