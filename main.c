@@ -30,12 +30,12 @@ typedef struct {
   char *cmd;
   int cachefile_time;
   pthread_mutex_t file_mutex;
+  pthread_cond_t done_cond;
 } file_info_t;
 
 typedef struct {
   file_info_t *file_info;
   FILE *fd;
-  pthread_cond_t done_cond;
 } file_info_work_t;
 
 void *do_fifo_work(void *arg) {
@@ -70,7 +70,7 @@ void *do_fifo_work(void *arg) {
   PRINT_DEBUG("Closed files.\n");
 
   // Let the master thread for this fifo know that we're done
-  pthread_cond_signal(&file_info_work->done_cond);
+  pthread_cond_signal(&file_info->done_cond);
   pthread_mutex_unlock(&file_info->file_mutex);
 
   pthread_exit(NULL);
@@ -115,13 +115,12 @@ void *do_fifo(void *arg) {
     file_info_work = malloc(sizeof(file_info_work_t));
     file_info_work->file_info = file_info;
     file_info_work->fd = fifo_fd;
-    pthread_cond_init(&file_info_work->done_cond, NULL);
     pthread_mutex_unlock(&file_info->file_mutex);
     pthread_create(&worker_threads[0], NULL, do_fifo_work,
       (void *)file_info_work);
     
     //Wait for thread to finish with file
-    pthread_cond_wait(&file_info_work->done_cond, &file_info->file_mutex);
+    pthread_cond_wait(&file_info->done_cond, &file_info->file_mutex);
     if (file_info->cachefile_time > 0) {
       // Set timer to delete file and replace with new fifo
       //sleep(file_info->cachefile_time*1000);
@@ -129,7 +128,6 @@ void *do_fifo(void *arg) {
     }
     pthread_mutex_unlock(&file_info->file_mutex);
     
-    pthread_cond_destroy(&file_info_work->done_cond);
     free(file_info_work);
   } while (1);
 
@@ -177,13 +175,16 @@ int main(int argc, char **argv) {
   file_info.cmd = "echo \"Hello World!\"";
   file_info.cachefile_time = 0;
   pthread_mutex_init(&file_info.file_mutex, NULL);
+  pthread_cond_init(&file_info.done_cond, NULL);
 
   pthread_create(&worker_threads[0], NULL, do_fifo, (void *)&file_info);
 
   // Wait for all processes to end
   pthread_join(worker_threads[0], &status);
 
+  pthread_cond_destroy(&file_info.done_cond);
   pthread_mutex_destroy(&file_info.file_mutex);
+
   pthread_mutex_destroy(&thread_cnt_mutex);
 
   pthread_exit(NULL);
