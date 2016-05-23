@@ -34,7 +34,8 @@ typedef struct {
 
 typedef struct {
   file_info_t *file_info;
-  FILE * fd;
+  FILE *fd;
+  pthread_cond_t done_cond;
 } file_info_work_t;
 
 void *do_fifo_work(void *arg) {
@@ -47,6 +48,7 @@ void *do_fifo_work(void *arg) {
   int feof_status = -1;
   int ret = -1;
 
+  pthread_mutex_lock(&file_info->file_mutex);
   PRINT_DEBUG("Executed process\n");
   proc_fd = popen(file_info->cmd, "r");
 
@@ -67,7 +69,10 @@ void *do_fifo_work(void *arg) {
   pclose(proc_fd);
   PRINT_DEBUG("Closed files.\n");
 
-  free(file_info_work);
+  // Let the master thread for this fifo know that we're done
+  pthread_cond_signal(&file_info_work->done_cond);
+  pthread_mutex_unlock(&file_info->file_mutex);
+
   pthread_exit(NULL);
 }
 
@@ -102,7 +107,7 @@ void *do_fifo(void *arg) {
     pthread_mutex_lock(&thread_cnt_mutex);
     if (++thread_cnt > thread_cnt_max) {
       thread_cnt--;
-      //pthread_cond_wait(&thread_cnt_avail,&thread_cnt_mutex);
+      //pthread_cond_wait(&thread_cnt_avail, &thread_cnt_mutex);
       thread_cnt++;
     }
     pthread_mutex_unlock(&thread_cnt_mutex);
@@ -110,16 +115,22 @@ void *do_fifo(void *arg) {
     file_info_work = malloc(sizeof(file_info_work_t));
     file_info_work->file_info = file_info;
     file_info_work->fd = fifo_fd;
+    pthread_cond_init(&file_info_work->done_cond, NULL);
+    pthread_mutex_unlock(&file_info->file_mutex);
     pthread_create(&worker_threads[0], NULL, do_fifo_work,
       (void *)file_info_work);
     
     //Wait for thread to finish with file
-    //pthread_mutex_lock(&file_info->file_mutex);
+    pthread_cond_wait(&file_info_work->done_cond, &file_info->file_mutex);
     if (file_info->cachefile_time > 0) {
       // Set timer to delete file and replace with new fifo
       //sleep(file_info->cachefile_time*1000);
-      //unlink(file_info->path);
+      unlink(file_info->path);
     }
+    pthread_mutex_unlock(&file_info->file_mutex);
+    
+    pthread_cond_destroy(&file_info_work->done_cond);
+    free(file_info_work);
   } while (1);
 
   ret = unlink(file_info->path);
